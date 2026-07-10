@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Drowsiness Detection — Live Camera Demo</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f4f5f7;
+    color: #1a1a1a;
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px;
+  }
+  .wrap { width: 100%; max-width: 760px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+  .subtitle { font-size: 14px; color: #666; margin: 0 0 20px; }
+  .card {
+    background: #ffffff;
+    border-radius: 14px;
+    border: 1px solid #e5e5e5;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+  .video-wrap {
+    position: relative;
+    width: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #111;
+    aspect-ratio: 4/3;
+    margin-bottom: 20px;
+    transition: box-shadow 0.15s;
+  }
+  .video-wrap.alert { box-shadow: 0 0 0 6px #e03131; }
+  video, canvas {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+  }
+  #startBtn {
+    width: 100%; padding: 14px; font-size: 15px; font-weight: 600;
+    border-radius: 10px; border: none; background: #1a1a1a; color: #fff;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  #startBtn:hover { background: #333; }
+  #startBtn:disabled { background: #ccc; cursor: default; }
+  .metrics { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .metric { background: #f8f8f8; border-radius: 10px; padding: 14px 16px; }
+  .metric-label { font-size: 13px; color: #666; display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .metric-value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #statusBanner {
+    border-radius: 10px; padding: 16px 18px; display: flex; align-items: center;
+    gap: 12px; margin-bottom: 8px; transition: background 0.2s;
+  }
+  #statusIcon { font-size: 24px; }
+  #statusText { font-weight: 600; font-size: 16px; }
+  #statusReason { font-size: 13px; color: #666; margin-top: 2px; }
+  .row { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  .toggle-btn {
+    padding: 8px 14px; border-radius: 8px; border: 1px solid #d0d0d0;
+    background: #fff; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 6px;
+  }
+  .toggle-btn:hover { background: #f0f0f0; }
+  .footer-note { font-size: 12.5px; color: #999; margin-top: 4px; }
+  #permissionMsg { font-size: 13px; color: #a15c00; background: #fff6e5; border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><i class="ti ti-eye" style="vertical-align:-3px;color:#d9480f;"></i> AI Drowsiness Detection — Live Camera Demo</h1>
+  <p class="subtitle">Runs fully in your browser. Your video never leaves this device — nothing is uploaded anywhere.</p>
+
+  <div id="permissionMsg">
+    <i class="ti ti-alert-circle"></i> If the camera doesn't start, check your browser's address-bar / site settings and allow camera access, then click "Start camera" again.
+  </div>
+
+  <div class="card">
+    <div class="video-wrap" id="videoWrap">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <button id="startBtn"><i class="ti ti-camera"></i> Start camera</button>
+
+    <div class="metrics" style="margin-top:20px;">
+      <div class="metric">
+        <div class="metric-label"><i class="ti ti-eye"></i>Eye closure</div>
+        <div class="metric-value" id="earVal">--</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label"><i class="ti ti-mood-smile"></i>Mouth open</div>
+        <div class="metric-value" id="marVal">--</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label"><i class="ti ti-axis-y"></i>Head pitch</div>
+        <div class="metric-value" id="pitchVal">--</div>
+      </div>
+    </div>
+
+    <div id="statusBanner" style="background:#f0f0f0;">
+      <i id="statusIcon" class="ti ti-player-play" style="color:#666;"></i>
+      <div>
+        <div id="statusText" style="color:#666;">Not started</div>
+        <div id="statusReason">Click "Start camera" to begin monitoring</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <button class="toggle-btn" id="testSirenBtn"><i class="ti ti-volume"></i> Test siren</button>
+      <button class="toggle-btn" id="muteBtn"><i class="ti ti-volume-2"></i> Mute alert sound</button>
+      <button class="toggle-btn" id="calibrateBtn"><i class="ti ti-focus-2"></i> Recalibrate head position</button>
+    </div>
+    <p class="footer-note">Look at the camera normally for ~1 second after clicking start, so the system learns your normal "eyes on the road" head position.</p>
+  </div>
+</div>
+
+<script type="module">
+import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('overlay');
+const ctx = canvas.getContext('2d');
+const videoWrap = document.getElementById('videoWrap');
+const startBtn = document.getElementById('startBtn');
+const permissionMsg = document.getElementById('permissionMsg');
+const testSirenBtn = document.getElementById('testSirenBtn');
+const muteBtn = document.getElementById('muteBtn');
+const calibrateBtn = document.getElementById('calibrateBtn');
+
+const els = {
+  ear: document.getElementById('earVal'),
+  mar: document.getElementById('marVal'),
+  pitch: document.getElementById('pitchVal'),
+  banner: document.getElementById('statusBanner'),
+  icon: document.getElementById('statusIcon'),
+  text: document.getElementById('statusText'),
+  reason: document.getElementById('statusReason'),
+};
+
+/* ---------------- Siren (Web Audio, no external file needed) ---------------- */
+let audioCtx = null;
+let sirenOsc = null;
+let sirenGain = null;
+let sirenSweepTimer = null;
+let muted = false;
+
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+function startSiren() {
+  if (muted) return;
+  ensureAudio();
+  if (sirenOsc) return;
+  sirenOsc = audioCtx.createOscillator();
+  sirenGain = audioCtx.createGain();
+  sirenOsc.type = 'sine';
+  sirenGain.gain.value = 0.15;
+  sirenOsc.connect(sirenGain).connect(audioCtx.destination);
+  sirenOsc.start();
+  let rising = true;
+  let freq = 500;
+  sirenSweepTimer = setInterval(() => {
+    freq += rising ? 40 : -40;
+    if (freq >= 900) rising = false;
+    if (freq <= 500) rising = true;
+    sirenOsc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  }, 30);
+}
+
+function stopSiren() {
+  if (sirenSweepTimer) { clearInterval(sirenSweepTimer); sirenSweepTimer = null; }
+  if (sirenOsc) {
+    try { sirenOsc.stop(); } catch (e) {}
+    sirenOsc.disconnect();
+    sirenGain.disconnect();
+    sirenOsc = null;
+  }
+}
+
+function testSirenBriefly() {
+  ensureAudio();
+  const wasMuted = muted;
+  muted = false;
+  startSiren();
+  setTimeout(() => { stopSiren(); muted = wasMuted; }, 1200);
+}
+
+testSirenBtn.addEventListener('click', testSirenBriefly);
+muteBtn.addEventListener('click', () => {
+  muted = !muted;
+  muteBtn.innerHTML = muted
+    ? '<i class="ti ti-volume-3"></i> Unmute alert sound'
+    : '<i class="ti ti-volume-2"></i> Mute alert sound';
+  if (muted) stopSiren();
+});
+
+/* ---------------- Drowsiness state machine (mirrors utils.py) ---------------- */
+const EYE_CLOSED_SCORE_THRESHOLD = 0.55;
+const EYE_CONSEC_FRAMES = 12;
+const MOUTH_OPEN_SCORE_THRESHOLD = 0.5;
+const YAWN_WINDOW_MS = 60000;
+const YAWN_COUNT_TRIGGER = 2;
+const PITCH_DROP_THRESHOLD = 15;
+const HEAD_CONSEC_FRAMES = 15;
+
+let eyeClosedCounter = 0;
+let headDownCounter = 0;
+let yawnEvents = [];
+let wasYawning = false;
+let baselinePitch = null;
+let calibrationFrames = 0;
+const CALIBRATION_FRAMES_NEEDED = 30;
+
+function resetCalibration() {
+  baselinePitch = null;
+  calibrationFrames = 0;
+}
+calibrateBtn.addEventListener('click', resetCalibration);
+
+function updateStateMachine(eyeScore, mouthScore, pitch) {
+  const now = Date.now();
+  const reasons = [];
+
+  if (calibrationFrames < CALIBRATION_FRAMES_NEEDED) {
+    baselinePitch = baselinePitch === null ? pitch : 0.9 * baselinePitch + 0.1 * pitch;
+    calibrationFrames++;
+  }
+
+  if (eyeScore > EYE_CLOSED_SCORE_THRESHOLD) {
+    eyeClosedCounter++;
+  } else {
+    eyeClosedCounter = 0;
+  }
+  if (eyeClosedCounter >= EYE_CONSEC_FRAMES) reasons.push('eyes_closed');
+
+  const isYawning = mouthScore > MOUTH_OPEN_SCORE_THRESHOLD;
+  if (isYawning && !wasYawning) yawnEvents.push(now);
+  wasYawning = isYawning;
+  yawnEvents = yawnEvents.filter(t => now - t <= YAWN_WINDOW_MS);
+  if (yawnEvents.length >= YAWN_COUNT_TRIGGER) reasons.push('frequent_yawning');
+
+  if (baselinePitch !== null && calibrationFrames >= CALIBRATION_FRAMES_NEEDED) {
+    if ((baselinePitch - pitch) > PITCH_DROP_THRESHOLD) {
+      headDownCounter++;
+    } else {
+      headDownCounter = 0;
+    }
+    if (headDownCounter >= HEAD_CONSEC_FRAMES) reasons.push('head_nod');
+  }
+
+  return reasons;
+}
+
+const reasonLabels = {
+  eyes_closed: 'Eyes closed too long',
+  frequent_yawning: 'Yawned repeatedly',
+  head_nod: 'Head dropping forward'
+};
+
+function renderStatus(reasons, calibrating) {
+  if (calibrating) {
+    videoWrap.classList.remove('alert');
+    stopSiren();
+    els.banner.style.background = '#fff6e5';
+    els.icon.className = 'ti ti-focus-2';
+    els.icon.style.color = '#a15c00';
+    els.text.textContent = 'Calibrating...';
+    els.text.style.color = '#a15c00';
+    els.reason.textContent = 'Look at the camera normally';
+    return;
+  }
+  if (reasons.length > 0) {
+    videoWrap.classList.add('alert');
+    startSiren();
+    els.banner.style.background = '#fbe7e7';
+    els.icon.className = 'ti ti-alert-triangle';
+    els.icon.style.color = '#c92a2a';
+    els.text.textContent = 'Drowsy alert';
+    els.text.style.color = '#c92a2a';
+    els.reason.textContent = reasons.map(r => reasonLabels[r] || r).join(' + ');
+  } else {
+    videoWrap.classList.remove('alert');
+    stopSiren();
+    els.banner.style.background = '#e3f5e9';
+    els.icon.className = 'ti ti-check';
+    els.icon.style.color = '#1a7d3a';
+    els.text.textContent = 'Awake';
+    els.text.style.color = '#1a7d3a';
+    els.reason.textContent = 'No fatigue signals detected';
+  }
+}
+
+/* ---------------- Camera + MediaPipe Face Landmarker ---------------- */
+let faceLandmarker = null;
+let running = false;
+
+async function setupFaceLandmarker() {
+  const filesetResolver = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  const modelPath = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+  try {
+    faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+      baseOptions: { modelAssetPath: modelPath, delegate: "GPU" },
+      outputFaceBlendshapes: true,
+      outputFacialTransformationMatrixes: true,
+      runningMode: "VIDEO",
+      numFaces: 1
+    });
+  } catch (gpuErr) {
+    console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
+    faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+      baseOptions: { modelAssetPath: modelPath, delegate: "CPU" },
+      outputFaceBlendshapes: true,
+      outputFacialTransformationMatrixes: true,
+      runningMode: "VIDEO",
+      numFaces: 1
+    });
+  }
+}
+
+function pitchFromMatrix(matrix) {
+  const m = matrix.data;
+  const m21 = m[9], m22 = m[10];
+  const m20 = m[8];
+  const pitchRad = Math.atan2(-m20, Math.sqrt(m21 * m21 + m22 * m22));
+  return pitchRad * (180 / Math.PI);
+}
+
+function getBlendshapeScore(blendshapes, name) {
+  const cat = blendshapes.categories.find(c => c.categoryName === name);
+  return cat ? cat.score : 0;
+}
+
+let lastVideoTime = -1;
+function predictLoop() {
+  if (!running) return;
+  const nowMs = performance.now();
+  if (video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    const result = faceLandmarker.detectForVideo(video, nowMs);
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const calibrating = calibrationFrames < CALIBRATION_FRAMES_NEEDED;
+
+    if (result.faceBlendshapes && result.faceBlendshapes.length > 0) {
+      const bs = result.faceBlendshapes[0];
+      const blinkL = getBlendshapeScore(bs, 'eyeBlinkLeft');
+      const blinkR = getBlendshapeScore(bs, 'eyeBlinkRight');
+      const jawOpen = getBlendshapeScore(bs, 'jawOpen');
+      const eyeScore = (blinkL + blinkR) / 2;
+
+      let pitch = 0;
+      if (result.facialTransformationMatrixes && result.facialTransformationMatrixes.length > 0) {
+        pitch = pitchFromMatrix(result.facialTransformationMatrixes[0]);
+      }
+
+      els.ear.textContent = (1 - eyeScore).toFixed(2);
+      els.mar.textContent = jawOpen.toFixed(2);
+      els.pitch.textContent = pitch.toFixed(1) + '\u00b0';
+
+      const reasons = updateStateMachine(eyeScore, jawOpen, pitch);
+      renderStatus(reasons, calibrating);
+    } else {
+      els.ear.textContent = '--';
+      els.mar.textContent = '--';
+      els.pitch.textContent = '--';
+      els.banner.style.background = '#fff6e5';
+      els.icon.className = 'ti ti-face-id-error';
+      els.icon.style.color = '#a15c00';
+      els.text.textContent = 'No face detected';
+      els.text.style.color = '#a15c00';
+      els.reason.textContent = 'Make sure your face is visible and well lit';
+      stopSiren();
+      videoWrap.classList.remove('alert');
+    }
+  }
+  requestAnimationFrame(predictLoop);
+}
+
+startBtn.addEventListener('click', async () => {
+  startBtn.disabled = true;
+  startBtn.innerHTML = '<i class="ti ti-loader-2"></i> Loading model...';
+  try {
+    if (!faceLandmarker) await setupFaceLandmarker();
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: "user" }
+    });
+    video.srcObject = stream;
+    await new Promise(res => { video.onloadedmetadata = res; });
+    video.play();
+
+    permissionMsg.style.display = 'none';
+    startBtn.innerHTML = '<i class="ti ti-player-stop"></i> Stop camera';
+    startBtn.disabled = false;
+    resetCalibration();
+    running = true;
+    predictLoop();
+
+    startBtn.onclick = () => {
+      running = false;
+      stopSiren();
+      const tracks = video.srcObject.getTracks();
+      tracks.forEach(t => t.stop());
+      video.srcObject = null;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      startBtn.innerHTML = '<i class="ti ti-camera"></i> Start camera';
+      els.text.textContent = 'Not started';
+      els.text.style.color = '#666';
+      els.reason.textContent = 'Click "Start camera" to begin monitoring';
+      els.banner.style.background = '#f0f0f0';
+      els.icon.className = 'ti ti-player-play';
+      els.icon.style.color = '#666';
+      els.ear.textContent = '--'; els.mar.textContent = '--'; els.pitch.textContent = '--';
+      videoWrap.classList.remove('alert');
+      startBtn.onclick = () => location.reload();
+    };
+  } catch (err) {
+    console.error(err);
+    permissionMsg.style.display = 'block';
+    startBtn.disabled = false;
+    startBtn.innerHTML = '<i class="ti ti-camera"></i> Start camera';
+  }
+});
+</script>
+</body>
+</html>

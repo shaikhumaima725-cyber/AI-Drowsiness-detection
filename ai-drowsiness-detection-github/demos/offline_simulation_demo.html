@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Drowsiness Detection — Live Demo</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f4f5f7;
+    color: #1a1a1a;
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px;
+  }
+  .wrap { width: 100%; max-width: 720px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+  .subtitle { font-size: 14px; color: #666; margin: 0 0 24px; }
+  .card {
+    background: #ffffff;
+    border-radius: 14px;
+    border: 1px solid #e5e5e5;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+  .controls { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  button#playBtn {
+    width: 44px; height: 44px; border-radius: 50%;
+    border: 1px solid #d0d0d0; background: #fff; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 18px; color: #1a1a1a;
+  }
+  button#playBtn:hover { background: #f0f0f0; }
+  input[type=range] { flex: 1; accent-color: #d9480f; }
+  #timeLabel { font-size: 13px; color: #666; min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+  .metrics { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .metric { background: #f8f8f8; border-radius: 10px; padding: 14px 16px; }
+  .metric-label { font-size: 13px; color: #666; display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .metric-value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #statusBanner {
+    border-radius: 10px; padding: 16px 18px; display: flex; align-items: center;
+    gap: 12px; margin-bottom: 20px; transition: background 0.2s;
+  }
+  #statusIcon { font-size: 24px; }
+  #statusText { font-weight: 600; font-size: 16px; }
+  #statusReason { font-size: 13px; color: #666; margin-top: 2px; }
+  #timeline { position: relative; height: 30px; border-radius: 8px; overflow: hidden; background: #d3f2dc; }
+  #timelineFill { position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: #fbdada; }
+  #timelineMarker { position: absolute; top: 0; left: 0%; width: 3px; height: 100%; background: #1a1a1a; }
+  .timeline-labels { display: flex; justify-content: space-between; font-size: 11px; color: #999; margin-top: 6px; }
+  .footer-note { font-size: 12.5px; color: #999; text-align: center; margin-top: 8px; }
+  code { background: #f0f0f0; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><i class="ti ti-eye" style="vertical-align:-3px;color:#d9480f;"></i> AI Drowsiness Detection — Live Demo</h1>
+  <p class="subtitle">Replays a simulated 60-second driving session through the real detection logic (<code>utils.py → DrowsinessStateMachine</code>).</p>
+
+  <div class="card">
+    <div class="controls">
+      <button id="playBtn"><i class="ti ti-player-play"></i></button>
+      <input type="range" id="scrub" min="0" max="119" value="0" step="1">
+      <span id="timeLabel">0.0s</span>
+    </div>
+
+    <div class="metrics">
+      <div class="metric">
+        <div class="metric-label"><i class="ti ti-eye"></i>Eye aspect ratio</div>
+        <div class="metric-value" id="earVal">0.30</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label"><i class="ti ti-mood-smile"></i>Mouth aspect ratio</div>
+        <div class="metric-value" id="marVal">0.24</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label"><i class="ti ti-axis-y"></i>Head pitch</div>
+        <div class="metric-value" id="pitchVal">0.0&deg;</div>
+      </div>
+    </div>
+
+    <div id="statusBanner" style="background:#e3f5e9;">
+      <i id="statusIcon" class="ti ti-check" style="color:#1a7d3a;"></i>
+      <div>
+        <div id="statusText" style="color:#1a7d3a;">Awake</div>
+        <div id="statusReason">No fatigue signals detected</div>
+      </div>
+    </div>
+
+    <div id="timeline">
+      <div id="timelineFill"></div>
+      <div id="timelineMarker"></div>
+    </div>
+    <div class="timeline-labels">
+      <span>0s</span><span>15s normal</span><span>30s yawns</span><span>45s eyes close</span><span>60s head nods</span>
+    </div>
+  </div>
+
+  <p class="footer-note">Thresholds: EAR &lt; 0.21 for 15 frames = eyes closed &middot; MAR &gt; 0.6 twice in 60s = frequent yawning &middot; pitch drop &gt; 15&deg; for 20 frames = head nod</p>
+</div>
+
+<script>
+const data = [[0.0,0.31,0.247,-0.6,0,[]],[0.5,0.309,0.242,-1.6,0,[]],[1.0,0.291,0.234,1.4,0,[]],[1.5,0.308,0.25,0.6,0,[]],[2.0,0.063,0.231,0.8,0,[]],[2.5,0.306,0.265,0.8,0,[]],[3.0,0.305,0.241,-1.9,0,[]],[3.5,0.278,0.251,1.9,0,[]],[4.0,0.327,0.255,0.6,0,[]],[4.5,0.311,0.25,0.2,0,[]],[5.0,0.063,0.253,-0.6,0,[]],[5.5,0.304,0.234,-1.7,0,[]],[6.0,0.309,0.241,-1.7,0,[]],[6.5,0.314,0.25,1.3,0,[]],[7.0,0.297,0.25,-0.8,0,[]],[7.5,0.304,0.246,0.2,0,[]],[8.0,0.275,0.249,0.8,0,[]],[8.5,0.326,0.24,-0.3,0,[]],[9.0,0.048,0.246,0.5,0,[]],[9.5,0.305,0.238,0.5,0,[]],[10.0,0.298,0.257,-0.7,0,[]],[10.5,0.313,0.235,-1.7,0,[]],[11.0,0.311,0.229,0.2,0,[]],[11.5,0.301,0.239,0.8,0,[]],[12.0,0.051,0.24,-2.1,0,[]],[12.5,0.295,0.251,-1.4,0,[]],[13.0,0.293,0.244,1.5,0,[]],[13.5,0.304,0.239,-0.8,0,[]],[14.0,0.305,0.24,-0.9,0,[]],[14.5,0.302,0.27,1.4,0,[]],[15.0,0.31,0.254,2.3,0,[]],[15.5,0.29,0.264,0.8,0,[]],[16.0,0.3,0.25,-0.2,0,[]],[16.5,0.3,0.48,1.0,0,[]],[17.0,0.304,0.674,0.6,0,[]],[17.5,0.298,0.804,-0.1,0,[]],[18.0,0.061,0.85,0.8,0,[]],[18.5,0.3,0.804,-1.4,0,[]],[19.0,0.299,0.674,0.2,0,[]],[19.5,0.299,0.48,-1.4,0,[]],[20.0,0.28,0.232,0.1,0,[]],[20.5,0.311,0.235,0.3,0,[]],[21.0,0.294,0.255,1.1,0,[]],[21.5,0.314,0.262,0.1,0,[]],[22.0,0.313,0.264,-0.0,0,[]],[22.5,0.319,0.263,0.5,0,[]],[23.0,0.322,0.264,-1.0,0,[]],[23.5,0.301,0.255,-1.0,0,[]],[24.0,0.043,0.266,-0.2,0,[]],[24.5,0.296,0.251,0.2,0,[]],[25.0,0.308,0.261,-0.6,0,[]],[25.5,0.298,0.242,-0.7,0,[]],[26.0,0.301,0.247,0.2,0,[]],[26.5,0.311,0.248,-2.1,0,[]],[27.0,0.279,0.245,-0.4,0,[]],[27.5,0.302,0.248,0.3,0,[]],[28.0,0.053,0.258,-0.2,0,[]],[28.5,0.301,0.246,-0.2,0,[]],[29.0,0.291,0.237,0.9,0,[]],[29.5,0.295,0.234,-0.2,0,[]],[30.0,0.302,0.25,-1.4,0,[]],[30.5,0.287,0.48,-1.0,0,[]],[31.0,0.314,0.674,-0.0,1,["frequent_yawning"]],[31.5,0.327,0.804,-0.6,1,["frequent_yawning"]],[32.0,0.301,0.85,-0.6,1,["frequent_yawning"]],[32.5,0.306,0.804,-1.6,1,["frequent_yawning"]],[33.0,0.116,0.674,1.0,1,["frequent_yawning"]],[33.5,0.306,0.48,0.7,1,["frequent_yawning"]],[34.0,0.303,0.256,1.4,1,["frequent_yawning"]],[34.5,0.287,0.268,-0.1,1,["frequent_yawning"]],[35.0,0.307,0.258,1.4,1,["frequent_yawning"]],[35.5,0.294,0.239,-0.6,1,["frequent_yawning"]],[36.0,0.298,0.244,0.9,1,["frequent_yawning"]],[36.5,0.303,0.246,-1.6,1,["frequent_yawning"]],[37.0,0.297,0.244,-0.8,1,["frequent_yawning"]],[37.5,0.294,0.247,1.4,1,["frequent_yawning"]],[38.0,0.109,0.259,0.3,1,["frequent_yawning"]],[38.5,0.297,0.263,-0.1,1,["frequent_yawning"]],[39.0,0.298,0.254,-1.6,1,["frequent_yawning"]],[39.5,0.312,0.262,-0.1,1,["frequent_yawning"]],[40.0,0.304,0.252,-0.3,1,["frequent_yawning"]],[40.5,0.305,0.26,-0.5,1,["frequent_yawning"]],[41.0,0.125,0.261,-0.0,1,["frequent_yawning"]],[41.5,0.312,0.252,1.1,1,["frequent_yawning"]],[42.0,0.316,0.244,0.6,1,["frequent_yawning"]],[42.5,0.317,0.235,-0.7,1,["frequent_yawning"]],[43.0,0.305,0.244,0.9,1,["frequent_yawning"]],[43.5,0.28,0.236,1.4,1,["frequent_yawning"]],[44.0,0.283,0.261,-0.5,1,["frequent_yawning"]],[44.5,0.282,0.251,1.7,1,["frequent_yawning"]],[45.0,0.092,0.265,0.3,1,["frequent_yawning"]],[45.5,0.109,0.257,-0.4,1,["eyes_closed","frequent_yawning"]],[46.0,0.089,0.238,-0.9,1,["eyes_closed","frequent_yawning"]],[46.5,0.098,0.255,1.1,1,["eyes_closed","frequent_yawning"]],[47.0,0.085,0.252,0.1,1,["eyes_closed","frequent_yawning"]],[47.5,0.087,0.26,0.5,1,["eyes_closed","frequent_yawning"]],[48.0,0.084,0.272,0.4,1,["eyes_closed","frequent_yawning"]],[48.5,0.086,0.245,-0.4,1,["eyes_closed","frequent_yawning"]],[49.0,0.09,0.255,-0.2,1,["eyes_closed","frequent_yawning"]],[49.5,0.089,0.261,0.3,1,["eyes_closed","frequent_yawning"]],[50.0,0.295,0.252,0.6,1,["frequent_yawning"]],[50.5,0.284,0.242,-1.0,1,["frequent_yawning"]],[51.0,0.289,0.246,-4.0,1,["frequent_yawning"]],[51.5,0.301,0.252,-6.4,1,["frequent_yawning"]],[52.0,0.297,0.25,-9.1,1,["frequent_yawning"]],[52.5,0.311,0.254,-12.0,1,["frequent_yawning"]],[53.0,0.309,0.245,-12.7,1,["frequent_yawning"]],[53.5,0.292,0.232,-13.8,1,["frequent_yawning"]],[54.0,0.291,0.272,-18.3,1,["frequent_yawning"]],[54.5,0.304,0.259,-19.8,1,["frequent_yawning","head_nod"]],[55.0,0.313,0.256,-22.3,1,["frequent_yawning","head_nod"]],[55.5,0.301,0.273,-19.7,1,["frequent_yawning","head_nod"]],[56.0,0.313,0.235,-21.7,1,["frequent_yawning","head_nod"]],[56.5,0.295,0.253,-22.1,1,["frequent_yawning","head_nod"]],[57.0,0.295,0.25,-21.7,1,["frequent_yawning","head_nod"]],[57.5,0.295,0.242,-22.3,1,["frequent_yawning","head_nod"]],[58.0,0.283,0.246,-22.9,1,["frequent_yawning","head_nod"]],[58.5,0.304,0.252,-21.9,1,["frequent_yawning","head_nod"]],[59.0,0.318,0.254,-21.9,1,["frequent_yawning","head_nod"]],[59.5,0.308,0.261,-20.9,1,["frequent_yawning","head_nod"]]];
+
+let idx = 0, playing = false, timer = null;
+
+const els = {
+  scrub: document.getElementById('scrub'),
+  time: document.getElementById('timeLabel'),
+  ear: document.getElementById('earVal'),
+  mar: document.getElementById('marVal'),
+  pitch: document.getElementById('pitchVal'),
+  banner: document.getElementById('statusBanner'),
+  icon: document.getElementById('statusIcon'),
+  text: document.getElementById('statusText'),
+  reason: document.getElementById('statusReason'),
+  fill: document.getElementById('timelineFill'),
+  marker: document.getElementById('timelineMarker'),
+  playBtn: document.getElementById('playBtn'),
+};
+
+const reasonLabels = {
+  eyes_closed: 'Eyes closed too long',
+  frequent_yawning: 'Yawned repeatedly',
+  head_nod: 'Head dropping forward'
+};
+
+function render(i) {
+  const d = data[i];
+  const t = d[0], ear = d[1], mar = d[2], pitch = d[3], state = d[4], reasons = d[5];
+  els.scrub.value = i;
+  els.time.textContent = t.toFixed(1) + 's';
+  els.ear.textContent = ear.toFixed(2);
+  els.mar.textContent = mar.toFixed(2);
+  els.pitch.textContent = pitch.toFixed(1) + '\u00b0';
+  els.marker.style.left = (t / 59.5 * 100) + '%';
+
+  if (state === 1) {
+    els.banner.style.background = '#fbe7e7';
+    els.icon.className = 'ti ti-alert-triangle';
+    els.icon.style.color = '#c92a2a';
+    els.text.textContent = 'Drowsy alert';
+    els.text.style.color = '#c92a2a';
+    els.reason.textContent = reasons.map(r => reasonLabels[r] || r).join(' + ');
+  } else {
+    els.banner.style.background = '#e3f5e9';
+    els.icon.className = 'ti ti-check';
+    els.icon.style.color = '#1a7d3a';
+    els.text.textContent = 'Awake';
+    els.text.style.color = '#1a7d3a';
+    els.reason.textContent = 'No fatigue signals detected';
+  }
+}
+
+const firstDrowsyIdx = data.findIndex(d => d[4] === 1);
+const firstDrowsyPct = (data[firstDrowsyIdx][0] / 59.5 * 100);
+els.fill.style.left = firstDrowsyPct + '%';
+els.fill.style.width = (100 - firstDrowsyPct) + '%';
+
+render(0);
+
+function step() {
+  idx++;
+  if (idx >= data.length) { idx = data.length - 1; pause(); }
+  render(idx);
+}
+function play() {
+  playing = true;
+  els.playBtn.innerHTML = '<i class="ti ti-player-pause"></i>';
+  timer = setInterval(step, 110);
+}
+function pause() {
+  playing = false;
+  els.playBtn.innerHTML = '<i class="ti ti-player-play"></i>';
+  clearInterval(timer);
+}
+els.playBtn.addEventListener('click', () => {
+  if (idx >= data.length - 1) idx = 0;
+  playing ? pause() : play();
+});
+els.scrub.addEventListener('input', (e) => {
+  pause();
+  idx = parseInt(e.target.value);
+  render(idx);
+});
+</script>
+</body>
+</html>
